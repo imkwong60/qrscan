@@ -339,8 +339,8 @@
                     <i class="fa-solid fa-qrcode"></i> 產生 QR Code
                 </h2>
                 
-                <label class="block text-xs text-zinc-400 mb-1.5 font-medium">內容（網址、文字、WiFi 等）</label>
-                <textarea id="gen-text" rows="3" placeholder="https://example.com 或 WIFI:T:WPA;S:MyWiFi;P:password;;"
+                <label class="block text-xs text-zinc-400 mb-1.5 font-medium">內容（可直接輸入，或用下方模板）</label>
+                <textarea id="gen-text" rows="3" placeholder="直接輸入網址、文字，或點下方「快捷模板」自動填寫"
                           class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl p-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60 resize-none mb-3"></textarea>
 
                 <div class="grid grid-cols-2 gap-3 mb-4">
@@ -401,6 +401,81 @@
                         <i class="fa-solid fa-address-card text-rose-400 mr-1"></i> 聯絡人
                     </button>
                 </div>
+            </div>
+
+            <!-- 模板引導表單（給一般人用，不用改代碼格式） -->
+            <div id="template-form" class="mt-4 hidden bg-zinc-800/80 border border-zinc-700 rounded-3xl p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 id="template-form-title" class="text-xs font-bold text-rose-400 flex items-center gap-1.5">
+                        <i class="fa-solid fa-pen-to-square"></i> <span>填寫資料</span>
+                    </h4>
+                    <button onclick="closeTemplateForm()" class="text-zinc-500 hover:text-zinc-300 text-xs">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <!-- WiFi 表單 -->
+                <div id="form-wifi" class="space-y-3 hidden">
+                    <div>
+                        <label class="block text-[11px] text-zinc-400 mb-1">WiFi 名稱 (SSID)</label>
+                        <input id="wifi-ssid" type="text" placeholder="例如：我家的 WiFi"
+                               class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] text-zinc-400 mb-1">密碼</label>
+                        <input id="wifi-pass" type="text" placeholder="WiFi 密碼"
+                               class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] text-zinc-400 mb-1">加密方式</label>
+                        <select id="wifi-type" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-zinc-100 focus:outline-none focus:border-rose-500/60">
+                            <option value="WPA">WPA / WPA2（最常見）</option>
+                            <option value="WEP">WEP（舊式）</option>
+                            <option value="nopass">無密碼</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 網址表單 -->
+                <div id="form-url" class="space-y-3 hidden">
+                    <div>
+                        <label class="block text-[11px] text-zinc-400 mb-1">網址</label>
+                        <input id="url-input" type="url" placeholder="https://example.com"
+                               class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60">
+                    </div>
+                </div>
+
+                <!-- 純文字表單 -->
+                <div id="form-text" class="space-y-3 hidden">
+                    <div>
+                        <label class="block text-[11px] text-zinc-400 mb-1">要寫的文字</label>
+                        <textarea id="text-input" rows="3" placeholder="輸入任何文字內容"
+                                  class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl p-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60 resize-none"></textarea>
+                    </div>
+                </div>
+
+                <!-- 聯絡人表單 -->
+                <div id="form-vcard" class="space-y-3 hidden">
+                    <div>
+                        <label class="block text-[11px] text-zinc-400 mb-1">姓名</label>
+                        <input id="vcard-name" type="text" placeholder="例如：陳大文"
+                               class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] text-zinc-400 mb-1">電話</label>
+                        <input id="vcard-tel" type="tel" placeholder="例如：91234567"
+                               class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] text-zinc-400 mb-1">電郵（選填）</label>
+                        <input id="vcard-email" type="email" placeholder="example@email.com"
+                               class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60">
+                    </div>
+                </div>
+
+                <button onclick="applyTemplateForm()" class="w-full mt-4 py-2.5 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-bold rounded-2xl transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-check"></i> 填入內容
+                </button>
             </div>
         </div>
     </main>
@@ -1305,27 +1380,107 @@
         }
 
         function fillTemplate(type) {
+            // 顯示對應的引導表單，讓一般人不用改代碼格式
+            const form = document.getElementById('template-form');
+            const title = document.getElementById('template-form-title').querySelector('span');
+            ['form-wifi', 'form-url', 'form-text', 'form-vcard'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+
+            form.classList.remove('hidden');
+            form.dataset.type = type;
+
+            if (type === 'wifi') {
+                title.textContent = '填寫 WiFi 資料';
+                document.getElementById('form-wifi').classList.remove('hidden');
+                document.getElementById('wifi-ssid').focus();
+            } else if (type === 'url') {
+                title.textContent = '填寫網址';
+                document.getElementById('form-url').classList.remove('hidden');
+                document.getElementById('url-input').focus();
+            } else if (type === 'text') {
+                title.textContent = '填寫文字';
+                document.getElementById('form-text').classList.remove('hidden');
+                document.getElementById('text-input').focus();
+            } else if (type === 'vcard') {
+                title.textContent = '填寫聯絡人';
+                document.getElementById('form-vcard').classList.remove('hidden');
+                document.getElementById('vcard-name').focus();
+            }
+        }
+
+        function closeTemplateForm() {
+            document.getElementById('template-form').classList.add('hidden');
+        }
+
+        function applyTemplateForm() {
+            const type = document.getElementById('template-form').dataset.type;
             const ta = document.getElementById('gen-text');
             const nameEl = document.getElementById('gen-name');
             const catEl = document.getElementById('gen-category');
+
             if (type === 'wifi') {
-                ta.value = 'WIFI:T:WPA;S:網路名稱;P:密碼;;';
-                nameEl.value = '我的 WiFi';
+                const ssid = (document.getElementById('wifi-ssid').value || '').trim();
+                const pass = (document.getElementById('wifi-pass').value || '').trim();
+                const enc = document.getElementById('wifi-type').value || 'WPA';
+                if (!ssid) {
+                    showToast('請輸入 WiFi 名稱');
+                    document.getElementById('wifi-ssid').focus();
+                    return;
+                }
+                // 正確的 WiFi QR 格式（特殊字元需轉義）
+                const esc = (s) => s.replace(/([\\;,:"])/g, '\\$1');
+                if (enc === 'nopass') {
+                    ta.value = `WIFI:T:nopass;S:${esc(ssid)};;`;
+                } else {
+                    ta.value = `WIFI:T:${enc};S:${esc(ssid)};P:${esc(pass)};;`;
+                }
+                nameEl.value = ssid || '我的 WiFi';
                 catEl.value = 'WiFi';
             } else if (type === 'url') {
-                ta.value = 'https://';
+                let url = (document.getElementById('url-input').value || '').trim();
+                if (!url) {
+                    showToast('請輸入網址');
+                    document.getElementById('url-input').focus();
+                    return;
+                }
+                if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+                ta.value = url;
                 nameEl.value = '';
                 catEl.value = '其他';
             } else if (type === 'text') {
-                ta.value = '';
-                nameEl.value = '';
+                const text = (document.getElementById('text-input').value || '').trim();
+                if (!text) {
+                    showToast('請輸入文字');
+                    document.getElementById('text-input').focus();
+                    return;
+                }
+                ta.value = text;
+                nameEl.value = text.slice(0, 20);
                 catEl.value = '其他';
             } else if (type === 'vcard') {
-                ta.value = 'BEGIN:VCARD\nVERSION:3.0\nFN:姓名\nTEL:電話\nEMAIL:email@example.com\nEND:VCARD';
-                nameEl.value = '我的聯絡人';
+                const name = (document.getElementById('vcard-name').value || '').trim();
+                const tel = (document.getElementById('vcard-tel').value || '').trim();
+                const email = (document.getElementById('vcard-email').value || '').trim();
+                if (!name && !tel) {
+                    showToast('請至少填姓名或電話');
+                    document.getElementById('vcard-name').focus();
+                    return;
+                }
+                let vcard = 'BEGIN:VCARD\nVERSION:3.0\n';
+                if (name) vcard += `FN:${name}\n`;
+                if (tel) vcard += `TEL:${tel}\n`;
+                if (email) vcard += `EMAIL:${email}\n`;
+                vcard += 'END:VCARD';
+                ta.value = vcard;
+                nameEl.value = name || '我的聯絡人';
                 catEl.value = '其他';
             }
-            ta.focus();
+
+            closeTemplateForm();
+            showToast('已填入，可以按「產生 QR」');
+            // 可選：自動產生
+            // generateQR();
         }
 
         // ========== 輔助 ==========
