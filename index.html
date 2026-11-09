@@ -445,8 +445,15 @@
                 <textarea id="modal-notes" rows="2" placeholder="備註（選填）" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl p-3 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60 resize-none mb-4"></textarea>
                 <div class="flex gap-2 w-full">
                     <button onclick="saveModalEdit()" class="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold rounded-2xl">儲存</button>
-                    <button onclick="downloadModalImage()" class="py-2.5 px-4 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-xs font-bold rounded-2xl"><i class="fa-solid fa-download"></i></button>
-                    <button onclick="deleteModalItem()" class="py-2.5 px-4 bg-red-900/60 hover:bg-red-800 text-red-300 text-xs font-bold rounded-2xl"><i class="fa-solid fa-trash"></i></button>
+                    <button onclick="shareModalImage()" class="py-2.5 px-4 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-xs font-bold rounded-2xl" title="分享">
+                        <i class="fa-solid fa-share-nodes"></i>
+                    </button>
+                    <button onclick="downloadModalImage()" class="py-2.5 px-4 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-xs font-bold rounded-2xl" title="下載">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
+                    <button onclick="deleteModalItem()" class="py-2.5 px-4 bg-red-900/60 hover:bg-red-800 text-red-300 text-xs font-bold rounded-2xl" title="刪除">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
                 </div>
             </div>
         </div>
@@ -1128,6 +1135,55 @@
             a.href = item.dataUrl;
             a.download = (item.name || 'qr') + '.jpg';
             a.click();
+        }
+
+        /** 使用 iPhone / iOS 原生分享功能分享 QR 圖片 */
+        async function shareModalImage() {
+            const item = myQRItems.find(i => i.id === currentModalId);
+            if (!item || !item.dataUrl) {
+                showToast('找不到圖片');
+                return;
+            }
+
+            try {
+                // dataURL → Blob → File
+                const res = await fetch(item.dataUrl);
+                const blob = await res.blob();
+                const ext = blob.type.includes('png') ? 'png' : 'jpg';
+                const fileName = ((item.name || 'qr').replace(/[\\/:*?"<>|]/g, '_') || 'qr') + '.' + ext;
+                const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+
+                // 優先使用 Web Share API（iOS 會跳出系統分享選單）
+                if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        files: [file],
+                        title: item.name || '熊本熊 QR',
+                        text: item.notes || (item.name ? `分享「${item.name}」的 QR Code` : '分享 QR Code')
+                    });
+                    showToast('已開啟分享');
+                    return;
+                }
+
+                // 部分瀏覽器支援 share 但不支援 files
+                if (navigator.share) {
+                    await navigator.share({
+                        title: item.name || '熊本熊 QR',
+                        text: item.notes || (item.name ? `分享「${item.name}」的 QR Code` : '分享 QR Code')
+                    });
+                    showToast('已開啟分享');
+                    return;
+                }
+
+                // 不支援分享 → 退回下載
+                showToast('此裝置不支援分享，改為下載');
+                downloadModalImage();
+            } catch (err) {
+                // 使用者取消分享會拋 AbortError，不需提示
+                if (err && err.name === 'AbortError') return;
+                console.error(err);
+                showToast('分享失敗，改為下載');
+                downloadModalImage();
+            }
         }
 
         // ========== 匯出全部 ==========
