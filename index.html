@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-HK" class="h-full">
+<html lang="zh-HK" class="h-full overflow-hidden">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -48,13 +48,42 @@
             src: url('lib/fonts/zen-900.ttf') format('truetype');
         }
 
+        /* 鎖定整頁，防止 iOS 滑動時整份 html/body 橡皮筋移動 */
+        html {
+            height: 100%;
+            height: 100dvh;
+            width: 100%;
+            overflow: hidden;
+            overscroll-behavior: none;
+            -webkit-text-size-adjust: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+
         body {
             font-family: 'Zen Maru Gothic', sans-serif;
-            padding-top: env(safe-area-inset-top);
-            padding-bottom: env(safe-area-inset-bottom);
-            padding-left: env(safe-area-inset-left);
-            padding-right: env(safe-area-inset-right);
+            height: 100%;
+            height: 100dvh;
+            width: 100%;
+            overflow: hidden;
+            overscroll-behavior: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            /* 左右 safe-area；上下改由 header / bottom-nav 各自處理，避免高度計算錯誤 */
+            padding-left: env(safe-area-inset-left, 0px);
+            padding-right: env(safe-area-inset-right, 0px);
+            padding-top: 0;
+            padding-bottom: 0;
+            margin: 0;
             -webkit-tap-highlight-color: transparent;
+            -webkit-overflow-scrolling: touch;
+            touch-action: manipulation;
         }
 
         #reader {
@@ -109,9 +138,29 @@
             animation: scan-laser 2.2s ease-in-out infinite;
         }
 
-        /* Bottom nav safe area */
+        /* Header 頂部 safe-area（notch / Dynamic Island）— 用 !important 蓋過 Tailwind pt */
+        header {
+            padding-top: max(0.875rem, env(safe-area-inset-top, 0px)) !important;
+            padding-bottom: 0.875rem;
+        }
+
+        /* Bottom nav 底部 safe-area（Home Indicator） */
         .bottom-nav {
-            padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+            padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px)) !important;
+        }
+
+        /* 主內容區：只讓內部 tab 滾動，外層不滾 */
+        main {
+            overscroll-behavior: none;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
+        }
+
+        /* Tab 滾動區：允許垂直滑動，阻止外層連鎖滾動 */
+        .tab-panel {
+            overscroll-behavior-y: contain;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
         }
 
         /* Hide scrollbar but keep scroll */
@@ -125,12 +174,24 @@
         /* Image card hover */
         .qr-card img { transition: transform 0.2s; }
         .qr-card:active img { transform: scale(0.96); }
+
+        /* 防止 iOS 長按選取 / 呼叫選單干擾手勢 */
+        img, button, a {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        /* 結果文字與輸入框仍可選取 */
+        #result-text, textarea, input, select {
+            -webkit-user-select: text;
+            user-select: text;
+        }
     </style>
 </head>
 <body class="h-full flex flex-col select-none overflow-hidden bg-slate-900 text-slate-100">
 
     <!-- 頂部導覽列 -->
-    <header class="flex justify-between items-center px-5 py-3.5 bg-zinc-800/95 backdrop-blur-md border-b border-rose-500/20 sticky top-0 z-30 shadow-md rounded-b-3xl">
+    <header class="flex justify-between items-center px-5 bg-zinc-800/95 backdrop-blur-md border-b border-rose-500/20 sticky top-0 z-30 shadow-md rounded-b-3xl">
         <div class="flex items-center gap-2.5">
             <div class="relative w-10 h-10 rounded-full border-2 border-rose-500 overflow-hidden shadow-lg shadow-rose-950/40 animate-kumamon bg-zinc-900">
                 <img src="icons/icon-192.png" alt="Kumamon" class="w-full h-full object-cover" onerror="this.style.display='none'; this.parentElement.innerHTML='<span class=\'text-2xl\'>🐻</span>'">
@@ -494,6 +555,9 @@
             renderCategoryChips();
             await loadMyQR();
 
+            // 防止 iOS 整頁橡皮筋移動：只允許 .tab-panel（可滾動區）內的垂直滑動
+            lockPageOverscroll();
+
             // iOS 絕對不註冊 SW（standalone 下 SW 會導致相機黑畫面）
             if (!isIOS) {
                 registerServiceWorker();
@@ -504,6 +568,36 @@
 
             document.addEventListener('visibilitychange', handleVisibilityChange);
         });
+
+        /** 鎖定頁面，避免滑動時整個 html/body 跟著移動（iOS 橡皮筋） */
+        function lockPageOverscroll() {
+            const isScrollable = (el) => {
+                if (!el || el === document.body || el === document.documentElement) return false;
+                const style = window.getComputedStyle(el);
+                const oy = style.overflowY;
+                if (oy !== 'auto' && oy !== 'scroll' && !el.classList.contains('no-scrollbar')) return false;
+                return el.scrollHeight > el.clientHeight + 1;
+            };
+
+            document.addEventListener('touchmove', (e) => {
+                // 允許多指（縮放等）或已在可滾動容器內
+                if (e.touches.length > 1) return;
+                let node = e.target;
+                while (node && node !== document.body) {
+                    if (isScrollable(node)) {
+                        // 已在頂/底時仍可能連鎖，交給 overscroll-behavior: contain 處理
+                        return;
+                    }
+                    // 相機區域、modal 內允許原生處理
+                    if (node.id === 'reader' || (node.closest && (node.closest('#view-modal') || node.closest('#reader')))) {
+                        return;
+                    }
+                    node = node.parentElement;
+                }
+                // 不在任何可滾動區 → 阻止預設，避免整頁移動
+                if (e.cancelable) e.preventDefault();
+            }, { passive: false });
+        }
 
         // iOS：徹底清除 Service Worker，避免黑畫面
         async function cleanupServiceWorkerForIOS() {
