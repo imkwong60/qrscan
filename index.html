@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="zh-HK" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>熊本熊 QR 掃描器</title>
+    
+    <!-- iOS / PWA 設定 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="熊本熊 QR">
+    <meta name="theme-color" content="#18181b">
+    <meta name="description" content="可愛的熊本熊 QR Code 掃描器 · 儲存 · 產生">
+    
+    <!-- Icons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <link rel="manifest" href="manifest.json">
+
+    <!-- 本地資源（完全離線，無 CDN） -->
+    <script src="lib/tailwindcss.js"></script>
+    <link rel="stylesheet" href="lib/all.min.css">
+    <script src="lib/html5-qrcode.min.js"></script>
+    <script src="lib/qrcode.min.js"></script>
+    <script src="lib/jszip.min.js"></script>
+
+    <style>
+        @font-face {
+            font-family: 'Zen Maru Gothic';
+            font-style: normal;
+            font-weight: 500;
+            font-display: swap;
+            src: url('lib/fonts/zen-500.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Zen Maru Gothic';
+            font-style: normal;
+            font-weight: 700;
+            font-display: swap;
+            src: url('lib/fonts/zen-700.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Zen Maru Gothic';
+            font-style: normal;
+            font-weight: 900;
+            font-display: swap;
+            src: url('lib/fonts/zen-900.ttf') format('truetype');
+        }
+
+        body {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+            padding-left: env(safe-area-inset-left);
+            padding-right: env(safe-area-inset-right);
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #reader {
+            width: 100% !important;
+            height: 100% !important;
+            min-height: 200px;
+        }
+        #reader video {
+            object-fit: cover !important;
+            width: 100% !important;
+            height: 100% !important;
+            border-radius: 1.75rem;
+            -webkit-playsinline: true;
+            playsinline: true;
+            /* iOS 黑畫面常見修復 */
+            transform: translateZ(0);
+            -webkit-transform: translateZ(0);
+        }
+        #reader img {
+            object-fit: cover !important;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        #reader__scan_region {
+            background: transparent !important;
+        }
+        #reader__dashboard {
+            display: none !important;
+        }
+        #reader__camera_selection {
+            display: none !important;
+        }
+
+        @keyframes kumamon-bounce {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            25% { transform: translateY(-4px) rotate(-3deg); }
+            75% { transform: translateY(-2px) rotate(3deg); }
+        }
+
+        .animate-kumamon {
+            animation: kumamon-bounce 2.5s infinite ease-in-out;
+        }
+
+        @keyframes scan-laser {
+            0% { top: 10%; opacity: 0.4; }
+            50% { top: 85%; opacity: 1; }
+            100% { top: 10%; opacity: 0.4; }
+        }
+
+        .animate-scan {
+            animation: scan-laser 2.2s ease-in-out infinite;
+        }
+
+        /* Bottom nav safe area */
+        .bottom-nav {
+            padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+        }
+
+        /* Hide scrollbar but keep scroll */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Tab content transition */
+        .tab-panel { display: none; }
+        .tab-panel.active { display: flex; flex-direction: column; }
+
+        /* Image card hover */
+        .qr-card img { transition: transform 0.2s; }
+        .qr-card:active img { transform: scale(0.96); }
+    </style>
+</head>
+<body class="h-full flex flex-col select-none overflow-hidden bg-slate-900 text-slate-100">
+
+    <!-- 頂部導覽列 -->
+    <header class="flex justify-between items-center px-5 py-3.5 bg-zinc-800/95 backdrop-blur-md border-b border-rose-500/20 sticky top-0 z-30 shadow-md rounded-b-3xl">
+        <div class="flex items-center gap-2.5">
+            <div class="relative w-10 h-10 rounded-full border-2 border-rose-500 overflow-hidden shadow-lg shadow-rose-950/40 animate-kumamon bg-zinc-900">
+                <img src="icons/icon-192.png" alt="Kumamon" class="w-full h-full object-cover" onerror="this.style.display='none'; this.parentElement.innerHTML='<span class=\'text-2xl\'>🐻</span>'">
+            </div>
+            <div>
+                <h1 class="font-black text-base text-white tracking-wide leading-tight flex items-center gap-1.5">
+                    熊本熊 QR <span class="text-[9px] bg-rose-500 text-white px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider">PWA</span>
+                </h1>
+                <p class="text-[11px] text-zinc-400 flex items-center gap-1.5 mt-0.5">
+                    <span id="status-indicator" class="w-2 h-2 rounded-full bg-emerald-400 inline-block shadow-sm"></span>
+                    <span id="status-text" class="font-medium text-emerald-400">Kumamon 準備好囉！</span>
+                </p>
+            </div>
+        </div>
+        <button id="btn-export-all" onclick="exportAllImages()" class="w-9 h-9 rounded-xl bg-zinc-700/80 hover:bg-zinc-600 text-rose-400 active:scale-90 transition-all flex items-center justify-center border border-zinc-600" title="匯出全部">
+            <i class="fa-solid fa-file-export text-sm"></i>
+        </button>
+    </header>
+
+    <!-- 主內容區 -->
+    <main class="flex-1 flex flex-col relative overflow-hidden max-w-md mx-auto w-full">
+
+        <!-- ========== TAB 1: 掃描 ========== -->
+        <div id="tab-scan" class="tab-panel active flex-1 overflow-y-auto no-scrollbar p-4">
+            <!-- iOS 安裝提示 -->
+            <div id="ios-prompt" class="mb-4 bg-zinc-800 border-2 border-rose-500/60 rounded-3xl p-4 shadow-2xl text-sm leading-relaxed hidden relative overflow-hidden">
+                <div class="flex items-start justify-between">
+                    <div class="flex items-center gap-2 font-bold text-rose-400 mb-1">
+                        <i class="fa-solid fa-heart text-rose-500"></i>
+                        <span>熊本熊邀請你安裝全屏 App！</span>
+                    </div>
+                    <button onclick="dismissIosPrompt()" class="text-zinc-400 hover:text-zinc-200 px-1">
+                        <i class="fa-solid fa-xmark text-base"></i>
+                    </button>
+                </div>
+                <ol class="list-decimal list-inside text-xs text-zinc-300 space-y-1.5 mt-2 font-medium">
+                    <li>點選 Safari 底部選單的 <i class="fa-solid fa-share-from-square text-rose-400"></i> <b>「分享」</b></li>
+                    <li>選擇 <i class="fa-regular fa-square-plus text-rose-400"></i> <b>「加入主畫面」</b></li>
+                    <li>點擊主畫面圖示，立即享受熊本熊<b>全屏模式</b>！</li>
+                </ol>
+            </div>
+
+            <!-- 掃描框 -->
+            <div class="relative w-full aspect-square max-w-xs mx-auto my-2 rounded-3xl border-4 border-rose-500 shadow-2xl shadow-rose-950/50 bg-black flex flex-col justify-center items-center overflow-hidden">
+                <div id="reader" class="w-full h-full"></div>
+
+                <!-- Overlay -->
+                <div id="scan-overlay" class="absolute inset-0 pointer-events-none border-[6px] border-zinc-900 rounded-3xl flex items-center justify-center">
+                    <div class="absolute -top-5 left-6 w-8 h-8 bg-zinc-900 border-2 border-rose-500 rounded-full"></div>
+                    <div class="absolute -top-5 right-6 w-8 h-8 bg-zinc-900 border-2 border-rose-500 rounded-full"></div>
+                    <div class="w-4/5 h-4/5 border-2 border-dashed border-rose-400/80 rounded-2xl relative flex flex-col justify-between p-2">
+                        <div class="absolute inset-x-2 h-1 bg-gradient-to-r from-transparent via-rose-500 to-transparent rounded-full animate-scan shadow-lg shadow-rose-500"></div>
+                    </div>
+                </div>
+
+                <!-- 相機權限 / 啟動提示 -->
+                <div id="camera-placeholder" class="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900/95 p-6 text-center z-10">
+                    <div class="w-16 h-16 bg-rose-500/20 rounded-full flex items-center justify-center mb-3 text-rose-500 text-2xl border border-rose-500/40">
+                        <i class="fa-solid fa-camera"></i>
+                    </div>
+                    <p class="text-xs text-zinc-300 font-bold mb-4" id="camera-msg">點擊下方按鈕開始掃描</p>
+                    <button id="btn-start-scan" onclick="startScanner()" class="px-6 py-3 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-rose-950 transition-all text-sm flex items-center gap-2">
+                        <i class="fa-solid fa-play"></i> 開始掃描
+                    </button>
+                </div>
+            </div>
+
+            <!-- 掃描結果卡片 -->
+            <div id="result-card" class="mt-4 bg-zinc-800 border-2 border-rose-500/40 rounded-3xl p-4 shadow-xl hidden transition-all">
+                <div class="flex items-center justify-between text-xs text-zinc-400 mb-2">
+                    <span class="font-bold text-rose-400 flex items-center gap-1.5">
+                        <i class="fa-solid fa-face-laugh-beam"></i> 掃描成功！熊本熊記下來了！
+                    </span>
+                    <span id="result-time" class="text-[10px] bg-zinc-700 px-2 py-0.5 rounded-full font-medium text-zinc-300">剛才</span>
+                </div>
+                <p id="result-text" class="text-xs font-mono break-all text-zinc-100 bg-zinc-900 p-3 rounded-2xl border border-zinc-700 max-h-24 overflow-y-auto mb-3 select-text"></p>
+                
+                <div class="flex gap-2">
+                    <button id="btn-open" onclick="openLink()" class="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-bold rounded-2xl shadow-md shadow-rose-950 transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-paper-plane"></i> 前往網頁
+                    </button>
+                    <button onclick="copyResult()" class="flex-1 py-2.5 bg-zinc-700 hover:bg-zinc-600 active:scale-95 text-zinc-200 text-xs font-bold rounded-2xl transition flex items-center justify-center gap-2">
+                        <i class="fa-regular fa-copy"></i> 複製內容
+                    </button>
+                </div>
+            </div>
+
+            <!-- 歷史紀錄 -->
+            <div class="mt-6 mb-20">
+                <div class="flex justify-between items-center mb-3 px-1">
+                    <h2 class="text-xs font-bold text-zinc-400 tracking-wider flex items-center gap-1.5">
+                        <i class="fa-solid fa-paw text-rose-500"></i> 熊本熊腳印 (歷史紀錄)
+                    </h2>
+                    <button onclick="clearHistory()" class="text-[11px] font-bold text-rose-400 hover:text-rose-300 bg-rose-950/60 px-2.5 py-1 rounded-full border border-rose-800/40">清空紀錄</button>
+                </div>
+                <ul id="history-list" class="space-y-2 pb-4">
+                    <!-- 動態注入 -->
+                </ul>
+            </div>
+        </div>
+
+        <!-- ========== TAB 2: 我的 QR ========== -->
+        <div id="tab-myqr" class="tab-panel flex-1 overflow-y-auto no-scrollbar p-4 pb-24">
+            <!-- 搜尋 + 分類 -->
+            <div class="sticky top-0 z-10 bg-slate-900/95 backdrop-blur-sm pb-3 -mx-4 px-4 pt-1">
+                <div class="relative mb-3">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 text-sm"></i>
+                    <input id="search-input" type="search" placeholder="搜尋名稱或備註..." 
+                           class="w-full bg-zinc-800 border border-zinc-700 rounded-2xl py-2.5 pl-10 pr-4 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-rose-500/60 transition"
+                           oninput="filterMyQR()">
+                </div>
+                <div id="category-chips" class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                    <!-- chips injected -->
+                </div>
+            </div>
+
+            <!-- 新增按鈕列 -->
+            <div class="flex gap-2 mb-4">
+                <label class="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-bold rounded-2xl shadow-md shadow-rose-950 transition flex items-center justify-center gap-2 cursor-pointer">
+                    <i class="fa-solid fa-camera"></i> 拍照 / 相簿
+                    <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handleImageUpload(event)">
+                </label>
+                <label class="flex-1 py-2.5 bg-zinc-700 hover:bg-zinc-600 active:scale-95 text-zinc-200 text-xs font-bold rounded-2xl transition flex items-center justify-center gap-2 cursor-pointer">
+                    <i class="fa-solid fa-image"></i> 上載圖片
+                    <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
+                </label>
+            </div>
+
+            <!-- QR 網格 -->
+            <div id="myqr-grid" class="grid grid-cols-2 gap-3">
+                <!-- cards injected -->
+            </div>
+
+            <div id="myqr-empty" class="text-center py-12 text-zinc-500 hidden">
+                <i class="fa-solid fa-box-open text-4xl text-rose-400/60 mb-3 block"></i>
+                <p class="text-sm font-medium">還沒有收藏的 QR 喔</p>
+                <p class="text-xs mt-1 text-zinc-600">拍下會員卡、WiFi、付款碼給熊本熊保管！</p>
+            </div>
+        </div>
+
+        <!-- ========== TAB 3: 產生 QR ========== -->
+        <div id="tab-generate" class="tab-panel flex-1 overflow-y-auto no-scrollbar p-4 pb-24">
+            <div class="bg-zinc-800/80 border border-zinc-700 rounded-3xl p-5 shadow-xl">
+                <h2 class="text-sm font-bold text-rose-400 mb-3 flex items-center gap-2">
+                    <i class="fa-solid fa-qrcode"></i> 產生 QR Code
+                </h2>
+                
+                <label class="block text-xs text-zinc-400 mb-1.5 font-medium">內容（網址、文字、WiFi 等）</label>
+                <textarea id="gen-text" rows="3" placeholder="https://example.com 或 WIFI:T:WPA;S:MyWiFi;P:password;;"
+                          class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl p-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60 resize-none mb-3"></textarea>
+
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div>
+                        <label class="block text-xs text-zinc-400 mb-1.5 font-medium">名稱（選填）</label>
+                        <input id="gen-name" type="text" placeholder="例如：公司 WiFi"
+                               class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-zinc-400 mb-1.5 font-medium">分類</label>
+                        <select id="gen-category" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-zinc-100 focus:outline-none focus:border-rose-500/60">
+                            <option value="其他">其他</option>
+                            <option value="會員卡">會員卡</option>
+                            <option value="WiFi">WiFi</option>
+                            <option value="付款碼">付款碼</option>
+                            <option value="票券">票券</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button onclick="generateQR()" class="w-full py-3 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-rose-950 transition flex items-center justify-center gap-2 text-sm">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> 產生 QR
+                </button>
+            </div>
+
+            <!-- 預覽區 -->
+            <div id="gen-preview" class="mt-5 hidden">
+                <div class="bg-zinc-800 border-2 border-rose-500/40 rounded-3xl p-5 shadow-xl flex flex-col items-center">
+                    <div id="qr-container" class="rounded-2xl bg-white p-3 shadow-inner flex items-center justify-center"></div>
+                    <p id="gen-preview-label" class="mt-3 text-xs text-zinc-400 font-medium text-center"></p>
+                    <div class="flex gap-2 mt-4 w-full">
+                        <button onclick="downloadGeneratedQR()" class="flex-1 py-2.5 bg-zinc-700 hover:bg-zinc-600 active:scale-95 text-zinc-200 text-xs font-bold rounded-2xl transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-download"></i> 下載
+                        </button>
+                        <button onclick="saveGeneratedToMyQR()" class="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-bold rounded-2xl shadow-md shadow-rose-950 transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-bookmark"></i> 存入我的 QR
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 快捷模板 -->
+            <div class="mt-6">
+                <h3 class="text-xs font-bold text-zinc-400 mb-2 flex items-center gap-1.5">
+                    <i class="fa-solid fa-bolt text-rose-500"></i> 快捷模板
+                </h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="fillTemplate('wifi')" class="py-2.5 bg-zinc-800 border border-zinc-700 rounded-2xl text-xs font-medium text-zinc-300 hover:border-rose-500/50 active:scale-95 transition">
+                        <i class="fa-solid fa-wifi text-rose-400 mr-1"></i> WiFi
+                    </button>
+                    <button onclick="fillTemplate('url')" class="py-2.5 bg-zinc-800 border border-zinc-700 rounded-2xl text-xs font-medium text-zinc-300 hover:border-rose-500/50 active:scale-95 transition">
+                        <i class="fa-solid fa-link text-rose-400 mr-1"></i> 網址
+                    </button>
+                    <button onclick="fillTemplate('text')" class="py-2.5 bg-zinc-800 border border-zinc-700 rounded-2xl text-xs font-medium text-zinc-300 hover:border-rose-500/50 active:scale-95 transition">
+                        <i class="fa-solid fa-font text-rose-400 mr-1"></i> 純文字
+                    </button>
+                    <button onclick="fillTemplate('vcard')" class="py-2.5 bg-zinc-800 border border-zinc-700 rounded-2xl text-xs font-medium text-zinc-300 hover:border-rose-500/50 active:scale-95 transition">
+                        <i class="fa-solid fa-address-card text-rose-400 mr-1"></i> 聯絡人
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 底部導覽列 -->
+    <nav class="bottom-nav fixed bottom-0 left-0 right-0 bg-zinc-800/95 backdrop-blur-md border-t border-rose-500/20 z-40 max-w-md mx-auto rounded-t-3xl shadow-2xl">
+        <div class="flex justify-around items-center py-2 px-2">
+            <button onclick="switchTab('scan')" id="nav-scan" class="nav-btn flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-2xl text-rose-400 transition-all">
+                <i class="fa-solid fa-qrcode text-lg"></i>
+                <span class="text-[10px] font-bold">掃描</span>
+            </button>
+            <button onclick="switchTab('myqr')" id="nav-myqr" class="nav-btn flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-2xl text-zinc-500 transition-all">
+                <i class="fa-solid fa-folder-open text-lg"></i>
+                <span class="text-[10px] font-bold">我的 QR</span>
+            </button>
+            <button onclick="switchTab('generate')" id="nav-generate" class="nav-btn flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-2xl text-zinc-500 transition-all">
+                <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
+                <span class="text-[10px] font-bold">產生</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- 檢視 / 編輯 Modal -->
+    <div id="view-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+        <div class="bg-zinc-800 border-2 border-rose-500/50 rounded-3xl w-full max-w-sm max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div class="p-4 border-b border-zinc-700 flex justify-between items-center sticky top-0 bg-zinc-800 rounded-t-3xl z-10">
+                <h3 class="font-bold text-rose-400 text-sm">QR 詳情</h3>
+                <button onclick="closeViewModal()" class="w-8 h-8 rounded-xl bg-zinc-700 text-zinc-300 flex items-center justify-center">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-5 flex flex-col items-center">
+                <img id="modal-img" src="" alt="QR" class="w-56 h-56 object-contain rounded-2xl bg-white p-2 shadow-inner mb-4">
+                <input id="modal-name" type="text" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-center font-bold text-zinc-100 mb-2 focus:outline-none focus:border-rose-500/60">
+                <select id="modal-category" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl py-2.5 px-3 text-sm text-zinc-100 mb-2 focus:outline-none focus:border-rose-500/60">
+                    <option value="會員卡">會員卡</option>
+                    <option value="WiFi">WiFi</option>
+                    <option value="付款碼">付款碼</option>
+                    <option value="票券">票券</option>
+                    <option value="其他">其他</option>
+                </select>
+                <textarea id="modal-notes" rows="2" placeholder="備註（選填）" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl p-3 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-rose-500/60 resize-none mb-4"></textarea>
+                <div class="flex gap-2 w-full">
+                    <button onclick="saveModalEdit()" class="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold rounded-2xl">儲存</button>
+                    <button onclick="downloadModalImage()" class="py-2.5 px-4 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-xs font-bold rounded-2xl"><i class="fa-solid fa-download"></i></button>
+                    <button onclick="deleteModalItem()" class="py-2.5 px-4 bg-red-900/60 hover:bg-red-800 text-red-300 text-xs font-bold rounded-2xl"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 bg-zinc-800 text-white text-xs font-bold px-5 py-3 rounded-full shadow-2xl transition-all duration-300 opacity-0 pointer-events-none z-50 flex items-center gap-2 border border-rose-500/50">
+        <span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block animate-ping"></span>
+        <span id="toast-msg">提示訊息</span>
+    </div>
+
+    <script>
+        // ========== 全域狀態 ==========
+        let html5QrCode = null;
+        let lastScannedText = "";
+        let isScanning = false;
+        let history = JSON.parse(localStorage.getItem('qr_kumamon_history') || '[]');
+        let currentTab = 'scan';
+        let currentCategory = '全部';
+        let myQRItems = []; // from IndexedDB
+        let currentModalId = null;
+        let generatedQRDataUrl = null;
+
+        const CATEGORIES = ['全部', '會員卡', 'WiFi', '付款碼', '票券', '其他'];
+
+        // iOS 偵測
+        const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || 
+                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+
+        // ========== IndexedDB ==========
+        const DB_NAME = 'KumamonQRDB';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'qr_images';
+        let dbPromise = null;
+
+        function openDB() {
+            if (dbPromise) return dbPromise;
+            dbPromise = new Promise((resolve, reject) => {
+                const req = indexedDB.open(DB_NAME, DB_VERSION);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                        store.createIndex('category', 'category', { unique: false });
+                        store.createIndex('name', 'name', { unique: false });
+                        store.createIndex('createdAt', 'createdAt', { unique: false });
+                    }
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => {
+                    dbPromise = null;
+                    reject(req.error);
+                };
+            });
+            return dbPromise;
+        }
+
+        async function dbAdd(item) {
+            const db = await openDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                tx.objectStore(STORE_NAME).put(item);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
+        async function dbGetAll() {
+            const db = await openDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readonly');
+                const req = tx.objectStore(STORE_NAME).getAll();
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function dbDelete(id) {
+            const db = await openDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                tx.objectStore(STORE_NAME).delete(id);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
+        async function loadMyQR() {
+            try {
+                myQRItems = await dbGetAll();
+                myQRItems.sort((a, b) => b.createdAt - a.createdAt);
+                renderMyQR();
+            } catch (e) {
+                console.error('Load MyQR failed', e);
+                myQRItems = [];
+                renderMyQR();
+            }
+        }
+
+        // ========== 初始化 ==========
+        window.addEventListener('DOMContentLoaded', async () => {
+            renderHistory();
+            checkStandaloneMode();
+            setupNetworkListeners();
+            renderCategoryChips();
+            await loadMyQR();
+
+            // iOS 絕對不註冊 SW（standalone 下 SW 會導致相機黑畫面）
+            if (!isIOS) {
+                registerServiceWorker();
+            } else {
+                // 徹底卸載可能殘留的 SW + 清掉舊快取
+                cleanupServiceWorkerForIOS();
+            }
+
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+        });
+
+        // iOS：徹底清除 Service Worker，避免黑畫面
+        async function cleanupServiceWorkerForIOS() {
+            if (!('serviceWorker' in navigator)) return;
+            try {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map(reg => reg.unregister()));
+                if (window.caches) {
+                    const keys = await caches.keys();
+                    await Promise.all(
+                        keys.filter(k => k.startsWith('kumamon-qr')).map(k => caches.delete(k))
+                    );
+                }
+                // 若頁面仍被 SW 控制，提示重新開啟一次
+                if (navigator.serviceWorker.controller) {
+                    console.warn('SW still controlling, reload recommended');
+                }
+            } catch (e) {
+                console.warn('SW cleanup failed', e);
+            }
+        }
+
+        function checkStandaloneMode() {
+            if (isIOS && !isStandalone && !localStorage.getItem('kumamon_ios_prompt_dismissed')) {
+                document.getElementById('ios-prompt').classList.remove('hidden');
+            }
+        }
+
+        function dismissIosPrompt() {
+            const el = document.getElementById('ios-prompt');
+            if (el) el.remove();
+            localStorage.setItem('kumamon_ios_prompt_dismissed', '1');
+        }
+
+        // ========== Tab 切換 ==========
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById('tab-' + tab).classList.add('active');
+
+            // nav highlight
+            document.querySelectorAll('.nav-btn').forEach(b => {
+                b.classList.remove('text-rose-400');
+                b.classList.add('text-zinc-500');
+            });
+            const nav = document.getElementById('nav-' + tab);
+            nav.classList.remove('text-zinc-500');
+            nav.classList.add('text-rose-400');
+
+            // 停止掃描相機當離開掃描頁
+            if (tab !== 'scan' && isScanning) {
+                stopScanner().then(() => {
+                    const placeholder = document.getElementById('camera-placeholder');
+                    const btn = document.getElementById('btn-start-scan');
+                    const msgEl = document.getElementById('camera-msg');
+                    if (placeholder) placeholder.classList.remove('hidden');
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fa-solid fa-play"></i> 開始掃描';
+                    }
+                    if (msgEl) msgEl.innerText = '點擊下方按鈕開始掃描';
+                });
+            }
+        }
+
+        // ========== 掃描相關（強化 iOS 全屏黑畫面修復） ==========
+        function handleVisibilityChange() {
+            // 進入背景一律停相機（省電 + 避免 iOS 鎖住 stream）
+            if (document.visibilityState === 'hidden' && isScanning) {
+                stopScanner().then(() => {
+                    // 回到前景時不要自動重開（iOS 非使用者手勢會黑畫面）
+                    // 改為顯示「開始掃描」按鈕讓使用者自己點
+                    const placeholder = document.getElementById('camera-placeholder');
+                    const btn = document.getElementById('btn-start-scan');
+                    const msgEl = document.getElementById('camera-msg');
+                    if (placeholder) {
+                        placeholder.classList.remove('hidden');
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.innerHTML = '<i class="fa-solid fa-play"></i> 繼續掃描';
+                        }
+                        if (msgEl) msgEl.innerText = '點擊下方按鈕繼續掃描';
+                    }
+                });
+            }
+        }
+
+        function stopScanner() {
+            return new Promise((resolve) => {
+                if (html5QrCode && isScanning) {
+                    html5QrCode.stop()
+                        .then(() => {
+                            isScanning = false;
+                            // 徹底清掉內部 DOM，避免殘留黑畫面
+                            try {
+                                const reader = document.getElementById('reader');
+                                if (reader) reader.innerHTML = '';
+                            } catch (_) {}
+                            // 銷毀實例，下次重新建立（iOS 較穩定）
+                            try { html5QrCode.clear(); } catch (_) {}
+                            html5QrCode = null;
+                            resolve();
+                        })
+                        .catch(() => {
+                            isScanning = false;
+                            try {
+                                const reader = document.getElementById('reader');
+                                if (reader) reader.innerHTML = '';
+                            } catch (_) {}
+                            html5QrCode = null;
+                            resolve();
+                        });
+                } else {
+                    isScanning = false;
+                    resolve();
+                }
+            });
+        }
+
+        async function startScanner() {
+            const placeholder = document.getElementById('camera-placeholder');
+            const msgEl = document.getElementById('camera-msg');
+            const btn = document.getElementById('btn-start-scan');
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 開啟中...';
+            msgEl.innerText = '正在開啟相機...';
+
+            // 確保前一次已完全停止
+            await stopScanner();
+
+            // 等一點點讓 iOS 釋放相機硬體
+            await new Promise(r => setTimeout(r, isIOS ? 250 : 50));
+
+            try {
+                // 每次都新建實例（iOS standalone 重用舊實例容易黑畫面）
+                html5QrCode = new Html5Qrcode("reader", { verbose: false });
+
+                const boxSize = Math.min(220, Math.floor(window.innerWidth * 0.55));
+                const config = { 
+                    fps: isIOS ? 8 : 10, 
+                    qrbox: { width: boxSize, height: boxSize },
+                    aspectRatio: 1.0,
+                    disableFlip: false
+                };
+
+                // 優先用相機列表選後置鏡頭（比單純 facingMode 穩）
+                let cameraIdOrConfig = { facingMode: "environment" };
+                try {
+                    const cameras = await Html5Qrcode.getCameras();
+                    if (cameras && cameras.length > 0) {
+                        // 優先找標籤含 back / rear / 後 / environment 的
+                        const back = cameras.find(c =>
+                            /back|rear|environment|後|后/i.test(c.label || '')
+                        );
+                        cameraIdOrConfig = (back || cameras[cameras.length - 1]).id;
+                    }
+                } catch (_) {
+                    // getCameras 失敗就退回 facingMode
+                }
+
+                await html5QrCode.start(
+                    cameraIdOrConfig,
+                    config,
+                    onScanSuccess,
+                    onScanFailure
+                );
+
+                isScanning = true;
+                placeholder.classList.add('hidden');
+                showToast("相機已開啟！");
+
+                // iOS 關鍵：強制 playsinline + play
+                const fixVideo = () => {
+                    const video = document.querySelector('#reader video');
+                    if (video) {
+                        video.setAttribute('playsinline', 'true');
+                        video.setAttribute('webkit-playsinline', 'true');
+                        video.setAttribute('muted', 'true');
+                        video.muted = true;
+                        video.playsInline = true;
+                        // 觸發重繪，有時能解黑畫面
+                        video.style.transform = 'translateZ(0)';
+                        const p = video.play();
+                        if (p && p.catch) p.catch(() => {});
+                    }
+                };
+                fixVideo();
+                setTimeout(fixVideo, 100);
+                setTimeout(fixVideo, 400);
+
+            } catch (err) {
+                console.error("相機啟動失敗", err);
+                isScanning = false;
+                html5QrCode = null;
+                placeholder.classList.remove('hidden');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-play"></i> 開始掃描';
+
+                let errMsg = "相機沒辦法打開";
+                const name = err && (err.name || err.message || '');
+                if (/NotAllowed|Permission|denied/i.test(name)) {
+                    errMsg = "請允許相機權限後再試";
+                } else if (/NotFound|DevicesNotFound|no camera/i.test(name)) {
+                    errMsg = "找不到可用的相機";
+                } else if (/NotReadable|TrackStart|AbortError/i.test(name)) {
+                    errMsg = "相機被其他 App 佔用，請關閉後再試";
+                } else if (isIOS && isStandalone) {
+                    errMsg = "全屏模式開啟失敗，請再按一次「開始掃描」";
+                }
+                msgEl.innerText = errMsg;
+                showToast(errMsg);
+            }
+        }
+
+        function onScanSuccess(decodedText, decodedResult) {
+            if (decodedText === lastScannedText) return;
+            lastScannedText = decodedText;
+            
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+
+            document.getElementById('result-card').classList.remove('hidden');
+            document.getElementById('result-text').innerText = decodedText;
+            document.getElementById('result-time').innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            const isUrl = isValidUrl(decodedText);
+            const btnOpen = document.getElementById('btn-open');
+            if (isUrl) btnOpen.classList.remove('hidden');
+            else btnOpen.classList.add('hidden');
+
+            saveHistory(decodedText);
+            showToast("熊本熊成功掃到內容囉！");
+        }
+
+        function onScanFailure(error) {}
+
+        // 歷史紀錄
+        function saveHistory(text) {
+            const item = {
+                id: Date.now(),
+                text: text,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                isUrl: isValidUrl(text)
+            };
+            if (history.length === 0 || history[0].text !== text) {
+                history.unshift(item);
+                if (history.length > 20) history.pop();
+                localStorage.setItem('qr_kumamon_history', JSON.stringify(history));
+                renderHistory();
+            }
+        }
+
+        function renderHistory() {
+            const listEl = document.getElementById('history-list');
+            if (history.length === 0) {
+                listEl.innerHTML = `
+                    <li class="text-zinc-500 text-xs text-center py-6 bg-zinc-800/40 rounded-3xl border border-dashed border-zinc-700">
+                        <i class="fa-solid fa-face-sad-tear text-rose-400 text-2xl mb-1 block"></i>
+                        還沒有紀錄喔，快拿 QR code 給熊本熊掃！
+                    </li>`;
+                return;
+            }
+            listEl.innerHTML = history.map(item => {
+                // JSON.stringify + escapeHtml 防止 XSS（屬性解析會解碼實體）
+                const safeText = escapeHtml(JSON.stringify(item.text));
+                return `
+                <li class="bg-zinc-800/80 border border-zinc-700 rounded-2xl p-3 flex items-center justify-between text-xs shadow-sm transition active:scale-[0.99]">
+                    <div class="flex-1 overflow-hidden mr-3">
+                        <p class="truncate text-zinc-200 font-mono font-medium">${escapeHtml(item.text)}</p>
+                        <span class="text-[10px] text-zinc-400 mt-0.5 block">${item.time}</span>
+                    </div>
+                    <div class="flex gap-1.5 shrink-0">
+                        ${item.isUrl ? `
+                            <button onclick="window.open(${safeText}, '_blank')" class="w-8 h-8 bg-rose-500/20 text-rose-400 border border-rose-500/40 rounded-xl hover:bg-rose-500/30 transition flex items-center justify-center">
+                                <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                            </button>
+                        ` : ''}
+                        <button onclick="copyToClipboard(${safeText})" class="w-8 h-8 bg-zinc-700 text-zinc-300 rounded-xl hover:bg-zinc-600 transition flex items-center justify-center">
+                            <i class="fa-regular fa-copy"></i>
+                        </button>
+                    </div>
+                </li>
+            `}).join('');
+        }
+
+        function clearHistory() {
+            history = [];
+            localStorage.removeItem('qr_kumamon_history');
+            renderHistory();
+            showToast("熊本熊已清空腳印！");
+        }
+
+        // ========== 我的 QR ==========
+        function renderCategoryChips() {
+            const container = document.getElementById('category-chips');
+            container.innerHTML = CATEGORIES.map(cat => `
+                <button onclick="setCategory('${cat}')" 
+                    class="category-chip shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold border transition
+                    ${currentCategory === cat ? 'bg-rose-500 border-rose-500 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-rose-500/40'}">
+                    ${cat}
+                </button>
+            `).join('');
+        }
+
+        function setCategory(cat) {
+            currentCategory = cat;
+            renderCategoryChips();
+            filterMyQR();
+        }
+
+        function filterMyQR() {
+            const q = (document.getElementById('search-input').value || '').toLowerCase().trim();
+            let filtered = myQRItems;
+            if (currentCategory !== '全部') {
+                filtered = filtered.filter(i => i.category === currentCategory);
+            }
+            if (q) {
+                filtered = filtered.filter(i => 
+                    (i.name || '').toLowerCase().includes(q) || 
+                    (i.notes || '').toLowerCase().includes(q)
+                );
+            }
+            renderMyQRGrid(filtered);
+        }
+
+        function renderMyQR() {
+            filterMyQR();
+        }
+
+        function renderMyQRGrid(items) {
+            const grid = document.getElementById('myqr-grid');
+            const empty = document.getElementById('myqr-empty');
+
+            if (!items || items.length === 0) {
+                grid.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+
+            grid.innerHTML = items.map(item => `
+                <div class="qr-card bg-zinc-800 border border-zinc-700 rounded-2xl overflow-hidden shadow-md active:scale-[0.98] transition cursor-pointer" onclick="openViewModal('${item.id}')">
+                    <div class="aspect-square bg-white p-2 flex items-center justify-center">
+                        <img src="${item.dataUrl}" alt="${escapeHtml(item.name || '')}" class="w-full h-full object-contain">
+                    </div>
+                    <div class="p-2.5">
+                        <p class="text-xs font-bold text-zinc-100 truncate">${escapeHtml(item.name || '未命名')}</p>
+                        <div class="flex items-center justify-between mt-1">
+                            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 font-medium">${escapeHtml(item.category || '其他')}</span>
+                            <span class="text-[10px] text-zinc-500">${formatDate(item.createdAt)}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function formatDate(ts) {
+            const d = new Date(ts);
+            return `${d.getMonth()+1}/${d.getDate()}`;
+        }
+
+        async function handleImageUpload(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            if (!file.type.startsWith('image/')) {
+                showToast('請選擇圖片檔案');
+                return;
+            }
+
+            // 壓縮 / 轉 base64
+            const dataUrl = await compressImage(file, 800);
+            if (!dataUrl) {
+                showToast('圖片讀取失敗');
+                event.target.value = '';
+                return;
+            }
+            const name = file.name.replace(/\.[^/.]+$/, '') || 'QR 圖片';
+            const id = 'qr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+
+            const item = {
+                id,
+                name,
+                category: '其他',
+                notes: '',
+                dataUrl,
+                createdAt: Date.now()
+            };
+
+            try {
+                await dbAdd(item);
+                myQRItems.unshift(item);
+                renderMyQR();
+                showToast('已加入我的 QR！');
+                // 自動開啟編輯
+                openViewModal(id);
+            } catch (e) {
+                console.error(e);
+                showToast('儲存失敗');
+            }
+
+            // reset input
+            event.target.value = '';
+        }
+
+        function compressImage(file, maxSize = 800) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onerror = () => resolve(null);
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onerror = () => resolve(null);
+                    img.onload = () => {
+                        try {
+                            const canvas = document.createElement('canvas');
+                            let w = img.width, h = img.height;
+                            if (w > maxSize || h > maxSize) {
+                                if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+                                else { w = Math.round(w * maxSize / h); h = maxSize; }
+                            }
+                            canvas.width = w;
+                            canvas.height = h;
+                            const ctx = canvas.getContext('2d');
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillRect(0, 0, w, h);
+                            ctx.drawImage(img, 0, 0, w, h);
+                            resolve(canvas.toDataURL('image/jpeg', 0.85));
+                        } catch (err) {
+                            resolve(null);
+                        }
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function openViewModal(id) {
+            const item = myQRItems.find(i => i.id === id);
+            if (!item) return;
+            currentModalId = id;
+            document.getElementById('modal-img').src = item.dataUrl;
+            document.getElementById('modal-name').value = item.name || '';
+            document.getElementById('modal-category').value = item.category || '其他';
+            document.getElementById('modal-notes').value = item.notes || '';
+            document.getElementById('view-modal').classList.remove('hidden');
+            document.getElementById('view-modal').classList.add('flex');
+        }
+
+        function closeViewModal() {
+            document.getElementById('view-modal').classList.add('hidden');
+            document.getElementById('view-modal').classList.remove('flex');
+            currentModalId = null;
+        }
+
+        async function saveModalEdit() {
+            if (!currentModalId) return;
+            const item = myQRItems.find(i => i.id === currentModalId);
+            if (!item) return;
+
+            item.name = document.getElementById('modal-name').value.trim() || '未命名';
+            item.category = document.getElementById('modal-category').value;
+            item.notes = document.getElementById('modal-notes').value.trim();
+
+            try {
+                await dbAdd(item);
+                renderMyQR();
+                showToast('已更新！');
+                closeViewModal();
+            } catch (e) {
+                showToast('儲存失敗');
+            }
+        }
+
+        async function deleteModalItem() {
+            if (!currentModalId) return;
+            if (!confirm('確定要刪除這個 QR 嗎？')) return;
+            try {
+                await dbDelete(currentModalId);
+                myQRItems = myQRItems.filter(i => i.id !== currentModalId);
+                renderMyQR();
+                closeViewModal();
+                showToast('已刪除');
+            } catch (e) {
+                showToast('刪除失敗');
+            }
+        }
+
+        function downloadModalImage() {
+            const item = myQRItems.find(i => i.id === currentModalId);
+            if (!item) return;
+            const a = document.createElement('a');
+            a.href = item.dataUrl;
+            a.download = (item.name || 'qr') + '.jpg';
+            a.click();
+        }
+
+        // ========== 匯出全部 ==========
+        async function exportAllImages() {
+            if (myQRItems.length === 0) {
+                showToast('目前沒有可匯出的圖片');
+                return;
+            }
+            showToast('正在打包中...');
+
+            try {
+                const zip = new JSZip();
+                const folder = zip.folder('熊本熊_QR_備份');
+
+                myQRItems.forEach((item, idx) => {
+                    // dataUrl -> binary
+                    const base64 = item.dataUrl.split(',')[1];
+                    const ext = item.dataUrl.startsWith('data:image/png') ? 'png' : 'jpg';
+                    // 用 idx + id 後綴避免同名覆蓋
+                    const base = (item.name || 'qr').replace(/[\\/:*?"<>|]/g, '_');
+                    const safeName = `${base}_${idx + 1}_${String(item.id).slice(-6)}.${ext}`;
+                    folder.file(safeName, base64, { base64: true });
+                });
+
+                // 也寫一個簡單清單
+                const list = myQRItems.map(i => `${i.name} | ${i.category} | ${new Date(i.createdAt).toLocaleString()}`).join('\n');
+                folder.file('清單.txt', list);
+
+                const blob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `熊本熊_QR_${new Date().toISOString().slice(0,10)}.zip`;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
+                showToast(`已匯出 ${myQRItems.length} 張圖片！`);
+            } catch (e) {
+                console.error(e);
+                showToast('匯出失敗，請稍後再試');
+            }
+        }
+
+        // ========== 產生 QR（使用本地 qrcodejs） ==========
+        function generateQR() {
+            const text = document.getElementById('gen-text').value.trim();
+            if (!text) {
+                showToast('請輸入內容');
+                return;
+            }
+
+            const container = document.getElementById('qr-container');
+            container.innerHTML = ''; // 清除舊的
+
+            try {
+                // qrcodejs API
+                new QRCode(container, {
+                    text: text,
+                    width: 240,
+                    height: 240,
+                    colorDark: '#18181b',
+                    colorLight: '#ffffff',
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+
+                // 等 DOM 更新後取圖
+                setTimeout(() => {
+                    const canvas = container.querySelector('canvas');
+                    const img = container.querySelector('img');
+                    if (canvas) {
+                        generatedQRDataUrl = canvas.toDataURL('image/png');
+                    } else if (img && img.src) {
+                        generatedQRDataUrl = img.src;
+                    } else {
+                        showToast('產生失敗');
+                        return;
+                    }
+                    document.getElementById('gen-preview').classList.remove('hidden');
+                    const name = document.getElementById('gen-name').value.trim() || text.slice(0, 30);
+                    document.getElementById('gen-preview-label').innerText = name;
+                    showToast('QR 產生成功！');
+                }, 50);
+            } catch (err) {
+                console.error(err);
+                showToast('產生失敗');
+            }
+        }
+
+        function downloadGeneratedQR() {
+            if (!generatedQRDataUrl) return;
+            const a = document.createElement('a');
+            a.href = generatedQRDataUrl;
+            a.download = (document.getElementById('gen-name').value.trim() || 'qrcode') + '.png';
+            a.click();
+        }
+
+        async function saveGeneratedToMyQR() {
+            if (!generatedQRDataUrl) return;
+            const name = document.getElementById('gen-name').value.trim() || document.getElementById('gen-text').value.trim().slice(0, 30) || '產生的 QR';
+            const category = document.getElementById('gen-category').value;
+            const id = 'qr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+
+            const item = {
+                id,
+                name,
+                category,
+                notes: document.getElementById('gen-text').value.trim().slice(0, 100),
+                dataUrl: generatedQRDataUrl,
+                createdAt: Date.now()
+            };
+
+            try {
+                await dbAdd(item);
+                myQRItems.unshift(item);
+                renderMyQR();
+                showToast('已存入我的 QR！');
+            } catch (e) {
+                showToast('儲存失敗');
+            }
+        }
+
+        function fillTemplate(type) {
+            const ta = document.getElementById('gen-text');
+            const nameEl = document.getElementById('gen-name');
+            const catEl = document.getElementById('gen-category');
+            if (type === 'wifi') {
+                ta.value = 'WIFI:T:WPA;S:網路名稱;P:密碼;;';
+                nameEl.value = '我的 WiFi';
+                catEl.value = 'WiFi';
+            } else if (type === 'url') {
+                ta.value = 'https://';
+                nameEl.value = '';
+                catEl.value = '其他';
+            } else if (type === 'text') {
+                ta.value = '';
+                nameEl.value = '';
+                catEl.value = '其他';
+            } else if (type === 'vcard') {
+                ta.value = 'BEGIN:VCARD\nVERSION:3.0\nFN:姓名\nTEL:電話\nEMAIL:email@example.com\nEND:VCARD';
+                nameEl.value = '我的聯絡人';
+                catEl.value = '其他';
+            }
+            ta.focus();
+        }
+
+        // ========== 輔助 ==========
+        function openLink() {
+            if (isValidUrl(lastScannedText)) {
+                window.open(lastScannedText, '_blank');
+            }
+        }
+
+        function copyResult() {
+            copyToClipboard(lastScannedText);
+        }
+
+        function copyToClipboard(text) {
+            if (!text) return;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => showToast("複製成功！"))
+                    .catch(() => fallbackCopy(text));
+            } else {
+                fallbackCopy(text);
+            }
+        }
+
+        function fallbackCopy(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                showToast("複製成功！");
+            } catch (err) {
+                showToast("複製失敗");
+            }
+            document.body.removeChild(textarea);
+        }
+
+        function isValidUrl(string) {
+            try {
+                const url = new URL(string);
+                return url.protocol === "http:" || url.protocol === "https:";
+            } catch (_) {
+                return false;  
+            }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/[&<>"']/g, function(m) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
+            });
+        }
+
+        let toastTimer = null;
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            toast.classList.remove('opacity-0', 'pointer-events-none');
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                toast.classList.add('opacity-0', 'pointer-events-none');
+                toastTimer = null;
+            }, 2500);
+        }
+
+        function setupNetworkListeners() {
+            const statusIndicator = document.getElementById('status-indicator');
+            const statusText = document.getElementById('status-text');
+
+            function updateOnlineStatus() {
+                if (navigator.onLine) {
+                    statusIndicator.className = "w-2 h-2 rounded-full bg-emerald-400 inline-block shadow-sm";
+                    statusText.className = "font-medium text-emerald-400";
+                    statusText.innerText = "Kumamon 準備好囉！";
+                } else {
+                    statusIndicator.className = "w-2 h-2 rounded-full bg-amber-400 inline-block shadow-sm";
+                    statusText.className = "font-medium text-amber-400";
+                    statusText.innerText = "離線模式中";
+                    showToast("目前離線，但依然可以繼續使用！");
+                }
+            }
+
+            window.addEventListener('online', updateOnlineStatus);
+            window.addEventListener('offline', updateOnlineStatus);
+            updateOnlineStatus();
+        }
+
+        function registerServiceWorker() {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('SW registered', reg.scope))
+                    .catch(err => console.error('SW failed', err));
+            }
+        }
+    </script>
+</body>
+</html>
