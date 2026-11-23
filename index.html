@@ -734,11 +734,16 @@
         }
 
         function photoObjectPath(email, id) {
-            return `${encodeURIComponent(email)}/${encodeURIComponent(id)}.jpg`;
+            return `${email}/${id}.jpg`;
+        }
+
+        function encodeStorageObjectPath(path) {
+            return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
         }
 
         async function uploadPhotoObject(path, blob) {
-            const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${path}`, {
+            const encodedPath = encodeStorageObjectPath(path);
+            const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${encodedPath}`, {
                 method: 'POST',
                 headers: supabaseHeaders({ 'Content-Type': blob.type || 'image/jpeg' }),
                 body: blob
@@ -753,10 +758,44 @@
                 error = null;
             }
             if (response.status === 409 || (error && error.error === 'Duplicate')) {
-                await supabaseFetch(`/storage/v1/object/public/${SUPABASE_BUCKET}/${path}`);
+                await supabaseFetch(`/storage/v1/object/public/${SUPABASE_BUCKET}/${encodedPath}`);
                 return;
             }
             throw new Error(`Supabase ${response.status}: ${detail || response.statusText}`);
+        }
+
+        async function deletePhotoObject(path) {
+            const response = await supabaseFetch(`/storage/v1/object/${SUPABASE_BUCKET}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prefixes: [path] })
+            });
+            const detail = await response.text();
+            let removed;
+            try {
+                removed = JSON.parse(detail);
+            } catch (_) {
+                removed = null;
+            }
+            if (Array.isArray(removed) && removed.some(file => file && file.name === path)) return;
+
+            const verification = await fetch(
+                `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${encodeStorageObjectPath(path)}?verify=${Date.now()}`,
+                { headers: supabaseHeaders({ 'Cache-Control': 'no-cache' }) }
+            );
+            if (verification.status === 404) return;
+            if (!verification.ok) {
+                const errorText = await verification.text();
+                let error;
+                try {
+                    error = JSON.parse(errorText);
+                } catch (_) {
+                    error = null;
+                }
+                if (error && String(error.statusCode) === '404' && /object not found/i.test(error.message || '')) return;
+                throw new Error(`Supabase ${verification.status}: ${errorText || verification.statusText}`);
+            }
+            throw new Error(`Storage 未確認刪除圖片：${path}`);
         }
 
         function blobToDataUrl(blob) {
@@ -815,7 +854,7 @@
                 for (const remote of remotePhotos) {
                     if (!remote || !remote.id || localById.has(remote.id) || pendingDeleteIds.has(remote.id)) continue;
                     const path = photoObjectPath(email, remote.id);
-                    const imageResponse = await supabaseFetch(`/storage/v1/object/public/${SUPABASE_BUCKET}/${path}`);
+                    const imageResponse = await supabaseFetch(`/storage/v1/object/public/${SUPABASE_BUCKET}/${encodeStorageObjectPath(path)}`);
                     const item = {
                         id: remote.id,
                         name: remote.name || '未命名',
@@ -868,11 +907,7 @@
                 });
                 for (const deletion of pendingDeletes) {
                     if (deletion.storagePath) {
-                        await supabaseFetch(`/storage/v1/object/${SUPABASE_BUCKET}`, {
-                            method: 'DELETE',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ prefixes: [photoObjectPath(email, deletion.id)] })
-                        });
+                        await deletePhotoObject(photoObjectPath(email, deletion.id));
                     }
                 }
                 if (pendingDeletes.length) {
