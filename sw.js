@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kumamon-qr-v4-local';
+const CACHE_NAME = 'kumamon-qr-v6-supabase';
 const ASSETS = [
   './',
   './index.html',
@@ -29,16 +29,13 @@ const ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => {
-        return Promise.allSettled(
-          ASSETS.map((url) =>
-            cache.add(url).catch((err) => {
-              console.warn('Failed to cache:', url, err);
-            })
-          )
-        );
-      })
+      .then((cache) => cache.addAll(ASSETS))
       .then(() => self.skipWaiting())
+      .catch((error) => {
+        return caches.delete(CACHE_NAME).then(() => {
+          throw error;
+        });
+      })
   );
 });
 
@@ -47,35 +44,40 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+        keys
+          .filter((key) => key.startsWith('kumamon-qr-') && key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
       )
     ).then(() => self.clients.claim())
   );
 });
 
-// Fetch: pure Cache-First（完全離線優先）
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
-  if (!url.protocol.startsWith('http')) return;
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
+    caches.open(CACHE_NAME).then((cache) => cache.match(event.request, { ignoreSearch: true })).then((cached) => {
       if (cached) return cached;
 
-      // 不在快取 → 嘗試網路（僅首次安裝時有用），成功後寫入快取
       return fetch(event.request)
         .then((response) => {
-          if (response && response.status === 200) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          if (response.ok) {
+            event.waitUntil(
+              caches.open(CACHE_NAME)
+                .then((cache) => cache.put(event.request, response.clone()))
+                .catch((error) => console.warn('Failed to cache:', event.request.url, error))
+            );
           }
           return response;
         })
         .catch(() => {
           if (event.request.destination === 'document' || event.request.mode === 'navigate') {
-            return caches.match('./index.html') || caches.match('./');
+            return caches.open(CACHE_NAME).then((cache) =>
+              cache.match(new URL('./index.html', self.registration.scope).href)
+            );
           }
           return new Response('Offline', { status: 503, statusText: 'Offline' });
         });
