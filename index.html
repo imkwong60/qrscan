@@ -308,6 +308,19 @@
                 </div>
             </div>
 
+            <section class="mb-4 rounded-2xl border border-zinc-700 bg-zinc-800/80 p-3">
+                <label for="cloud-email" class="mb-1.5 block text-xs font-bold text-zinc-300">雲端相片庫 Email</label>
+                <div class="flex gap-2">
+                    <input id="cloud-email" type="email" autocomplete="email" placeholder="name@example.com"
+                           class="min-w-0 flex-1 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-rose-500/60 focus:outline-none">
+                    <button id="cloud-sync-button" type="button" onclick="syncPhotosToCloud()"
+                            class="shrink-0 rounded-xl bg-rose-500 px-3 py-2 text-xs font-bold text-white transition active:scale-95">
+                        同步雲端
+                    </button>
+                </div>
+                <p class="mt-2 text-[10px] leading-relaxed text-zinc-500">首次同步會將尚未分配的本機 QR 歸入此 Email，metadata 存於 photos_[email]，圖片上傳至 photos。Email 只作資料分區，不是登入驗證；bucket 公開，請勿存放敏感相片。</p>
+            </section>
+
             <!-- 新增按鈕列 -->
             <div class="flex gap-2 mb-4">
                 <label class="flex-1 py-2.5 bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-bold rounded-2xl shadow-md shadow-rose-950 transition flex items-center justify-center gap-2 cursor-pointer">
@@ -553,6 +566,10 @@
         let generatedQRDataUrl = null;
 
         const CATEGORIES = ['全部', '會員卡', 'WiFi', '付款碼', '票券', '其他'];
+        const SUPABASE_URL = 'https://wanknivxcsrasdkkxmfr.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhbmtuaXZ4Y3NyYXNka2t4bWZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczMzE4NjcsImV4cCI6MjEwMjkwNzg2N30.tqsFimERtYCxoh8J-8FlqxByWtX2gNnyaGo08jditrs';
+        const SUPABASE_TABLE = 'notepad_data';
+        const SUPABASE_BUCKET = 'photos';
 
         // iOS 偵測
         const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || 
@@ -619,7 +636,11 @@
 
         async function loadMyQR() {
             try {
-                myQRItems = await dbGetAll();
+                const allItems = await dbGetAll();
+                const email = getCloudEmailValue();
+                myQRItems = email
+                    ? allItems.filter(item => !item.ownerEmail || item.ownerEmail === email)
+                    : allItems.filter(item => !item.ownerEmail);
                 myQRItems.sort((a, b) => b.createdAt - a.createdAt);
                 renderMyQR();
             } catch (e) {
@@ -629,24 +650,161 @@
             }
         }
 
+        function initializeCloudSync() {
+            const input = document.getElementById('cloud-email');
+            input.value = localStorage.getItem('kumamon_cloud_email') || '';
+            input.addEventListener('change', loadMyQR);
+        }
+
+        function getCloudEmailValue() {
+            const email = document.getElementById('cloud-email').value.trim().toLowerCase();
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+        }
+
+        function supabaseHeaders(extraHeaders = {}) {
+            return {
+                apikey: SUPABASE_ANON_KEY,
+                Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+                ...extraHeaders
+            };
+        }
+
+        async function supabaseFetch(path, options = {}) {
+            const response = await fetch(`${SUPABASE_URL}${path}`, {
+                ...options,
+                headers: supabaseHeaders(options.headers || {})
+            });
+            if (!response.ok) {
+                const detail = await response.text();
+                throw new Error(`Supabase ${response.status}: ${detail || response.statusText}`);
+            }
+            return response;
+        }
+
+        function photoObjectPath(email, id) {
+            return `${encodeURIComponent(email)}/${encodeURIComponent(id)}.jpg`;
+        }
+
+        function blobToDataUrl(blob) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error || new Error('圖片讀取失敗'));
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        async function syncPhotosToCloud() {
+            const button = document.getElementById('cloud-sync-button');
+            const email = getCloudEmailValue();
+            if (!email) {
+                showToast('請輸入有效的 Email');
+                return;
+            }
+            if (!navigator.onLine) {
+                showToast('目前離線；相片已保留在本機，連線後再同步');
+                return;
+            }
+
+            localStorage.setItem('kumamon_cloud_email', email);
+            button.disabled = true;
+            button.textContent = '同步中...';
+            try {
+                const allItems = await dbGetAll();
+                myQRItems = allItems.filter(item => !item.ownerEmail || item.ownerEmail === email);
+                const rowId = `photos_${email}`;
+                const query = new URLSearchParams({ select: 'id,data', id: `eq.${rowId}` });
+                const response = await supabaseFetch(`/rest/v1/${SUPABASE_TABLE}?${query.toString()}`);
+                const rows = await response.json();
+                const remotePhotos = rows[0] && rows[0].data && Array.isArray(rows[0].data.photos)
+                    ? rows[0].data.photos
+                    : [];
+                const localById = new Map(myQRItems.map(item => [item.id, item]));
+
+                for (const remote of remotePhotos) {
+                    if (!remote || !remote.id || localById.has(remote.id)) continue;
+                    const path = photoObjectPath(email, remote.id);
+                    const imageResponse = await supabaseFetch(`/storage/v1/object/public/${SUPABASE_BUCKET}/${path}`);
+                    const item = {
+                        id: remote.id,
+                        name: remote.name || '未命名',
+                        category: remote.category || '其他',
+                        notes: remote.notes || '',
+                        dataUrl: await blobToDataUrl(await imageResponse.blob()),
+                        createdAt: Number(remote.createdAt) || Date.now(),
+                        ownerEmail: email,
+                        storagePath: path
+                    };
+                    await dbAdd(item);
+                    myQRItems.push(item);
+                    localById.set(item.id, item);
+                }
+
+                const photos = [];
+                for (const item of myQRItems) {
+                    const path = photoObjectPath(email, item.id);
+                    item.ownerEmail = email;
+                    if (item.dataUrl) {
+                        const image = await fetch(item.dataUrl);
+                        const blob = await image.blob();
+                        await supabaseFetch(`/storage/v1/object/${SUPABASE_BUCKET}/${path}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': blob.type || 'image/jpeg',
+                                'x-upsert': 'true'
+                            },
+                            body: blob
+                        });
+                        item.storagePath = path;
+                        await dbAdd(item);
+                    } else if (item.storagePath !== path) {
+                        throw new Error(`找不到「${item.name || item.id}」的本機圖片`);
+                    }
+                    photos.push({
+                        id: item.id,
+                        name: item.name || '未命名',
+                        category: item.category || '其他',
+                        notes: item.notes || '',
+                        createdAt: item.createdAt,
+                        storagePath: path
+                    });
+                }
+
+                await supabaseFetch(`/rest/v1/${SUPABASE_TABLE}?on_conflict=id`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Prefer: 'resolution=merge-duplicates,return=minimal'
+                    },
+                    body: JSON.stringify({
+                        id: rowId,
+                        data: { photos },
+                        updated_at: new Date().toISOString()
+                    })
+                });
+                renderMyQR();
+                showToast(`已同步 ${photos.length} 張 QR 圖片`);
+            } catch (error) {
+                console.error('Supabase photo sync failed', error);
+                showToast(`雲端同步失敗；本機資料保留（${error.message}）`);
+            } finally {
+                button.disabled = false;
+                button.textContent = '同步雲端';
+            }
+        }
+
         // ========== 初始化 ==========
         window.addEventListener('DOMContentLoaded', async () => {
             renderHistory();
             checkStandaloneMode();
             setupNetworkListeners();
+            initializeCloudSync();
             renderCategoryChips();
+            registerServiceWorker();
             await loadMyQR();
 
             // 防止 iOS 整頁橡皮筋移動：只允許 .tab-panel（可滾動區）內的垂直滑動
             lockPageOverscroll();
-
-            // iOS 絕對不註冊 SW（standalone 下 SW 會導致相機黑畫面）
-            if (!isIOS) {
-                registerServiceWorker();
-            } else {
-                // 徹底卸載可能殘留的 SW + 清掉舊快取
-                cleanupServiceWorkerForIOS();
-            }
 
             document.addEventListener('visibilitychange', handleVisibilityChange);
         });
@@ -715,27 +873,6 @@
                     if (e.cancelable) e.preventDefault();
                 }
             }, { passive: false });
-        }
-
-        // iOS：徹底清除 Service Worker，避免黑畫面
-        async function cleanupServiceWorkerForIOS() {
-            if (!('serviceWorker' in navigator)) return;
-            try {
-                const regs = await navigator.serviceWorker.getRegistrations();
-                await Promise.all(regs.map(reg => reg.unregister()));
-                if (window.caches) {
-                    const keys = await caches.keys();
-                    await Promise.all(
-                        keys.filter(k => k.startsWith('kumamon-qr')).map(k => caches.delete(k))
-                    );
-                }
-                // 若頁面仍被 SW 控制，提示重新開啟一次
-                if (navigator.serviceWorker.controller) {
-                    console.warn('SW still controlling, reload recommended');
-                }
-            } catch (e) {
-                console.warn('SW cleanup failed', e);
-            }
         }
 
         function checkStandaloneMode() {
@@ -1101,6 +1238,7 @@
                 category: '其他',
                 notes: '',
                 dataUrl,
+                ownerEmail: getCloudEmailValue() || null,
                 createdAt: Date.now()
             };
 
@@ -1366,6 +1504,7 @@
                 category,
                 notes: document.getElementById('gen-text').value.trim().slice(0, 100),
                 dataUrl: generatedQRDataUrl,
+                ownerEmail: getCloudEmailValue() || null,
                 createdAt: Date.now()
             };
 
