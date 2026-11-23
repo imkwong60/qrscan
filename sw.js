@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kumamon-qr-v8-storage-insert';
+const CACHE_NAME = 'kumamon-qr-v9-auto-sync';
 const ASSETS = [
   './',
   './index.html',
