@@ -689,6 +689,28 @@
             return `${encodeURIComponent(email)}/${encodeURIComponent(id)}.jpg`;
         }
 
+        async function uploadPhotoObject(path, blob) {
+            const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${path}`, {
+                method: 'POST',
+                headers: supabaseHeaders({ 'Content-Type': blob.type || 'image/jpeg' }),
+                body: blob
+            });
+            if (response.ok) return;
+
+            const detail = await response.text();
+            let error;
+            try {
+                error = JSON.parse(detail);
+            } catch (_) {
+                error = null;
+            }
+            if (response.status === 409 || (error && error.error === 'Duplicate')) {
+                await supabaseFetch(`/storage/v1/object/public/${SUPABASE_BUCKET}/${path}`);
+                return;
+            }
+            throw new Error(`Supabase ${response.status}: ${detail || response.statusText}`);
+        }
+
         function blobToDataUrl(blob) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -751,14 +773,7 @@
                     if (item.dataUrl) {
                         const image = await fetch(item.dataUrl);
                         const blob = await image.blob();
-                        await supabaseFetch(`/storage/v1/object/${SUPABASE_BUCKET}/${path}`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': blob.type || 'image/jpeg',
-                                'x-upsert': 'true'
-                            },
-                            body: blob
-                        });
+                        await uploadPhotoObject(path, blob);
                         item.storagePath = path;
                         await dbAdd(item);
                     } else if (item.storagePath !== path) {
