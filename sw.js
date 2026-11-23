@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kumamon-qr-v6-supabase';
+const CACHE_NAME = 'kumamon-qr-v7-horizontal-gesture';
 const ASSETS = [
   './',
   './index.html',
