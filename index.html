@@ -322,7 +322,7 @@
                         同步雲端
                     </button>
                 </div>
-                <p class="mt-2 text-[10px] leading-relaxed text-zinc-500">首次同步會將尚未分配的本機 QR 歸入此 Email，metadata 存於 photos_[email]，圖片上傳至 photos。Email 只作資料分區，不是登入驗證；bucket 公開，請勿存放敏感相片。</p>
+                <p class="mt-2 text-[10px] leading-relaxed text-zinc-500">輸入 Email 後自動同步；離線變更會在恢復連線後同步。首次同步會將未分配的本機 QR 歸入此 Email。Email 只作資料分區，不是登入驗證；bucket 公開，請勿存放敏感相片。</p>
             </section>
 
             <!-- 新增按鈕列 -->
@@ -574,6 +574,8 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhbmtuaXZ4Y3NyYXNka2t4bWZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczMzE4NjcsImV4cCI6MjEwMjkwNzg2N30.tqsFimERtYCxoh8J-8FlqxByWtX2gNnyaGo08jditrs';
         const SUPABASE_TABLE = 'notepad_data';
         const SUPABASE_BUCKET = 'photos';
+        let cloudSyncInProgress = false;
+        let cloudSyncQueued = false;
 
         // iOS 偵測
         const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || 
@@ -657,12 +659,58 @@
         function initializeCloudSync() {
             const input = document.getElementById('cloud-email');
             input.value = localStorage.getItem('kumamon_cloud_email') || '';
-            input.addEventListener('change', loadMyQR);
+            input.addEventListener('change', async () => {
+                const email = getCloudEmailValue();
+                if (email) localStorage.setItem('kumamon_cloud_email', email);
+                else localStorage.removeItem('kumamon_cloud_email');
+                await loadMyQR();
+                requestAutomaticCloudSync();
+            });
         }
 
         function getCloudEmailValue() {
             const email = document.getElementById('cloud-email').value.trim().toLowerCase();
             return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+        }
+
+        function requestAutomaticCloudSync() {
+            if (!getCloudEmailValue() || !navigator.onLine) return;
+            if (cloudSyncInProgress) {
+                cloudSyncQueued = true;
+                return;
+            }
+            syncPhotosToCloud({ silent: true });
+        }
+
+        function pendingPhotoDeletesKey(email) {
+            return `kumamon_pending_photo_deletes_${email}`;
+        }
+
+        function getPendingPhotoDeletes(email) {
+            const serialized = localStorage.getItem(pendingPhotoDeletesKey(email));
+            if (!serialized) return [];
+            const pending = JSON.parse(serialized);
+            if (!Array.isArray(pending)) throw new Error('待同步刪除清單格式錯誤');
+            return pending.filter(entry => entry && typeof entry.id === 'string');
+        }
+
+        function queuePhotoDeletion(item) {
+            if (!item.ownerEmail) return false;
+            const pending = getPendingPhotoDeletes(item.ownerEmail);
+            const entry = pending.find(deleted => deleted.id === item.id);
+            if (!entry) {
+                pending.push({ id: item.id, storagePath: item.storagePath || null });
+                localStorage.setItem(pendingPhotoDeletesKey(item.ownerEmail), JSON.stringify(pending));
+            }
+            return true;
+        }
+
+        function unqueuePhotoDeletion(item) {
+            if (!item.ownerEmail) return;
+            const key = pendingPhotoDeletesKey(item.ownerEmail);
+            const pending = getPendingPhotoDeletes(item.ownerEmail).filter(entry => entry.id !== item.id);
+            if (pending.length) localStorage.setItem(key, JSON.stringify(pending));
+            else localStorage.removeItem(key);
         }
 
         function supabaseHeaders(extraHeaders = {}) {
@@ -720,7 +768,11 @@
             });
         }
 
-        async function syncPhotosToCloud() {
+        async function syncPhotosToCloud(options = {}) {
+            if (cloudSyncInProgress) {
+                cloudSyncQueued = true;
+                return;
+            }
             const button = document.getElementById('cloud-sync-button');
             const email = getCloudEmailValue();
             if (!email) {
@@ -733,6 +785,7 @@
             }
 
             localStorage.setItem('kumamon_cloud_email', email);
+            cloudSyncInProgress = true;
             button.disabled = true;
             button.textContent = '同步中...';
             try {
@@ -745,10 +798,22 @@
                 const remotePhotos = rows[0] && rows[0].data && Array.isArray(rows[0].data.photos)
                     ? rows[0].data.photos
                     : [];
+                const pendingDeletes = getPendingPhotoDeletes(email);
+                const pendingDeleteIds = new Set(pendingDeletes.map(entry => entry.id));
+                let pendingDeletesChanged = false;
+                for (const deletion of pendingDeletes) {
+                    if (!deletion.storagePath && remotePhotos.some(photo => photo && photo.id === deletion.id)) {
+                        deletion.storagePath = photoObjectPath(email, deletion.id);
+                        pendingDeletesChanged = true;
+                    }
+                }
+                if (pendingDeletesChanged) {
+                    localStorage.setItem(pendingPhotoDeletesKey(email), JSON.stringify(pendingDeletes));
+                }
                 const localById = new Map(myQRItems.map(item => [item.id, item]));
 
                 for (const remote of remotePhotos) {
-                    if (!remote || !remote.id || localById.has(remote.id)) continue;
+                    if (!remote || !remote.id || localById.has(remote.id) || pendingDeleteIds.has(remote.id)) continue;
                     const path = photoObjectPath(email, remote.id);
                     const imageResponse = await supabaseFetch(`/storage/v1/object/public/${SUPABASE_BUCKET}/${path}`);
                     const item = {
@@ -801,14 +866,32 @@
                         updated_at: new Date().toISOString()
                     })
                 });
+                for (const deletion of pendingDeletes) {
+                    if (deletion.storagePath) {
+                        await supabaseFetch(`/storage/v1/object/${SUPABASE_BUCKET}`, {
+                            method: 'DELETE',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ prefixes: [photoObjectPath(email, deletion.id)] })
+                        });
+                    }
+                }
+                if (pendingDeletes.length) {
+                    localStorage.removeItem(pendingPhotoDeletesKey(email));
+                }
                 renderMyQR();
-                showToast(`已同步 ${photos.length} 張 QR 圖片`);
+                if (!options.silent) showToast(`已同步 ${photos.length} 張 QR 圖片`);
             } catch (error) {
                 console.error('Supabase photo sync failed', error);
-                showToast(`雲端同步失敗；本機資料保留（${error.message}）`);
+                const prefix = options.silent ? '自動同步失敗' : '雲端同步失敗';
+                showToast(`${prefix}；本機資料保留（${error.message}）`);
             } finally {
+                cloudSyncInProgress = false;
                 button.disabled = false;
                 button.textContent = '同步雲端';
+                if (cloudSyncQueued) {
+                    cloudSyncQueued = false;
+                    requestAutomaticCloudSync();
+                }
             }
         }
 
@@ -821,6 +904,7 @@
             renderCategoryChips();
             registerServiceWorker();
             await loadMyQR();
+            requestAutomaticCloudSync();
 
             // 防止 iOS 整頁橡皮筋移動：只允許 .tab-panel（可滾動區）內的垂直滑動
             lockPageOverscroll();
@@ -1288,6 +1372,7 @@
                 showToast('已加入我的 QR！');
                 // 自動開啟編輯
                 openViewModal(id);
+                requestAutomaticCloudSync();
             } catch (e) {
                 console.error(e);
                 showToast('儲存失敗');
@@ -1361,6 +1446,7 @@
                 renderMyQR();
                 showToast('已更新！');
                 closeViewModal();
+                requestAutomaticCloudSync();
             } catch (e) {
                 showToast('儲存失敗');
             }
@@ -1369,13 +1455,25 @@
         async function deleteModalItem() {
             if (!currentModalId) return;
             if (!confirm('確定要刪除這個 QR 嗎？')) return;
+            const item = myQRItems.find(i => i.id === currentModalId);
+            let deletionQueued = false;
             try {
+                if (item) deletionQueued = queuePhotoDeletion(item);
                 await dbDelete(currentModalId);
                 myQRItems = myQRItems.filter(i => i.id !== currentModalId);
                 renderMyQR();
                 closeViewModal();
                 showToast('已刪除');
+                requestAutomaticCloudSync();
             } catch (e) {
+                if (deletionQueued) {
+                    try {
+                        unqueuePhotoDeletion(item);
+                    } catch (rollbackError) {
+                        console.error('Failed to restore pending photo deletion', rollbackError);
+                    }
+                }
+                console.error('Delete QR failed', e);
                 showToast('刪除失敗');
             }
         }
@@ -1552,6 +1650,7 @@
                 myQRItems.unshift(item);
                 renderMyQR();
                 showToast('已存入我的 QR！');
+                requestAutomaticCloudSync();
             } catch (e) {
                 showToast('儲存失敗');
             }
@@ -1735,6 +1834,7 @@
                     statusIndicator.className = "w-2 h-2 rounded-full bg-emerald-400 inline-block shadow-sm";
                     statusText.className = "font-medium text-emerald-400";
                     statusText.innerText = "Kumamon 準備好囉！";
+                    requestAutomaticCloudSync();
                 } else {
                     statusIndicator.className = "w-2 h-2 rounded-full bg-amber-400 inline-block shadow-sm";
                     statusText.className = "font-medium text-amber-400";
