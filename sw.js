@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kumamon-qr-v11-delete-verify';
+const CACHE_NAME = 'kumamon-qr-v12-storage-delete';
 const ASSETS = [
   './',
   './index.html',
