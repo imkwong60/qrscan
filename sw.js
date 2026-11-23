@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kumamon-qr-v9-auto-sync';
+const CACHE_NAME = 'kumamon-qr-v11-delete-verify';
 const ASSETS = [
   './',
   './index.html',
