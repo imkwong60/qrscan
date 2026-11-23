@@ -765,37 +765,11 @@
         }
 
         async function deletePhotoObject(path) {
-            const response = await supabaseFetch(`/storage/v1/object/${SUPABASE_BUCKET}`, {
+            await supabaseFetch(`/storage/v1/object/${SUPABASE_BUCKET}`, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prefixes: [path] })
             });
-            const detail = await response.text();
-            let removed;
-            try {
-                removed = JSON.parse(detail);
-            } catch (_) {
-                removed = null;
-            }
-            if (Array.isArray(removed) && removed.some(file => file && file.name === path)) return;
-
-            const verification = await fetch(
-                `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${encodeStorageObjectPath(path)}?verify=${Date.now()}`,
-                { headers: supabaseHeaders({ 'Cache-Control': 'no-cache' }) }
-            );
-            if (verification.status === 404) return;
-            if (!verification.ok) {
-                const errorText = await verification.text();
-                let error;
-                try {
-                    error = JSON.parse(errorText);
-                } catch (_) {
-                    error = null;
-                }
-                if (error && String(error.statusCode) === '404' && /object not found/i.test(error.message || '')) return;
-                throw new Error(`Supabase ${verification.status}: ${errorText || verification.statusText}`);
-            }
-            throw new Error(`Storage 未確認刪除圖片：${path}`);
         }
 
         function blobToDataUrl(blob) {
