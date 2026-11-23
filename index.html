@@ -54,6 +54,7 @@
             height: 100dvh;
             width: 100%;
             overflow: hidden;
+            overflow-x: hidden;
             overscroll-behavior: none;
             -webkit-text-size-adjust: 100%;
         }
@@ -64,6 +65,7 @@
             height: 100dvh;
             width: 100%;
             overflow: hidden;
+            overflow-x: hidden;
             overscroll-behavior: none;
             position: fixed; /* 關鍵：固定 body 避免整頁被系統拉動 */
             top: 0;
@@ -146,6 +148,7 @@
 
         /* 主內容區：只讓內部 tab 滾動，外層不滾 */
         main {
+            overflow-x: hidden;
             overscroll-behavior: none;
             -webkit-overflow-scrolling: touch;
             touch-action: pan-y;
@@ -153,6 +156,7 @@
 
         /* Tab 滾動區：允許垂直滑動，阻止外層連鎖滾動 */
         .tab-panel {
+            overflow-x: hidden;
             overscroll-behavior-y: contain;
             -webkit-overflow-scrolling: touch;
             touch-action: pan-y;
@@ -813,6 +817,7 @@
          *  只在可滾動容器內、且未到頂/底時允許滑動；到頂/底或非滾動區一律 preventDefault
          */
         function lockPageOverscroll() {
+            let startX = 0;
             let startY = 0;
 
             const isScrollable = (el) => {
@@ -826,13 +831,33 @@
 
             // 只記錄起始位置，絕不在 touchstart 做 preventDefault（會導致按鈕/換頁失效）
             document.addEventListener('touchstart', (e) => {
-                if (e.touches.length === 1) startY = e.touches[0].clientY;
+                if (e.touches.length === 1) {
+                    startX = e.touches[0].clientX;
+                    startY = e.touches[0].clientY;
+                }
             }, { passive: true });
 
             document.addEventListener('touchmove', (e) => {
                 if (e.touches.length > 1) return;
 
                 const t = e.target;
+                const dx = e.touches[0].clientX - startX;
+                const dy = e.touches[0].clientY - startY;
+
+                if (
+                    Math.abs(dx) > 8 &&
+                    Math.abs(dx) > Math.abs(dy) &&
+                    !(t && t.closest && (
+                        t.closest('#category-chips') ||
+                        t.closest('#reader') ||
+                        t.closest('input') ||
+                        t.closest('textarea')
+                    ))
+                ) {
+                    if (e.cancelable) e.preventDefault();
+                    return;
+                }
+
                 // 相機 / Modal / 可互動元素一律放行
                 if (t && t.closest && (
                     t.closest('#reader') ||
@@ -865,7 +890,6 @@
                 }
 
                 // 已在可滾動區：只有「到頂還往下拉」或「到底還往上拉」才擋
-                const dy = e.touches[0].clientY - startY;
                 const atTop = scrollable.scrollTop <= 0;
                 const atBottom = scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight - 1;
 
