@@ -765,11 +765,41 @@
         }
 
         async function deletePhotoObject(path) {
-            await supabaseFetch(`/storage/v1/object/${SUPABASE_BUCKET}`, {
+            const response = await supabaseFetch(`/storage/v1/object/${SUPABASE_BUCKET}`, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prefixes: [path] })
             });
+            const detail = await response.text();
+            let removed;
+            try {
+                removed = JSON.parse(detail);
+            } catch (_) {
+                removed = null;
+            }
+            const fileName = path.split('/').pop();
+            if (Array.isArray(removed) && removed.some(file =>
+                file && typeof file.name === 'string' &&
+                (file.name === path || file.name === fileName || file.name.endsWith(`/${fileName}`))
+            )) return;
+
+            const verification = await fetch(
+                `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${encodeStorageObjectPath(path)}?verify=${Date.now()}`,
+                { method: 'HEAD', cache: 'no-store', headers: supabaseHeaders({ 'Cache-Control': 'no-cache' }) }
+            );
+            if (verification.status === 404) return;
+            if (!verification.ok) {
+                const errorText = await verification.text();
+                let error;
+                try {
+                    error = JSON.parse(errorText);
+                } catch (_) {
+                    error = null;
+                }
+                if (error && String(error.statusCode) === '404' && /object not found/i.test(error.message || '')) return;
+                throw new Error(`Supabase ${verification.status}: ${errorText || verification.statusText}`);
+            }
+            throw new Error(`Storage API 未回報已刪除檔案（${detail || '沒有刪除紀錄'}）：${path}`);
         }
 
         function blobToDataUrl(blob) {
